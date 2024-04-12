@@ -76,7 +76,7 @@ func main() {
 
     done := make(chan struct{})
 
-    ticker := time.NewTicker(30 * time.Second)
+    ticker := time.NewTicker(5 * time.Second)
     defer ticker.Stop()
     go func() {
         for {
