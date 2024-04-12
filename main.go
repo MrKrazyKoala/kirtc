@@ -33,11 +33,11 @@ func sendCameraInfo(c *websocket.Conn, serial, mac string) {
     }
     message, err := json.Marshal(cameraInfo)
     if err != nil {
-        log.Println("Error marshalling camera info:", err)
+        log.Printf("Error marshalling camera info: %v", err)
         return
     }
     if err := c.WriteMessage(websocket.TextMessage, message); err != nil {
-        log.Println("Error sending camera info:", err)
+        log.Printf("Error sending camera info: %v", err)
     }
 }
 
@@ -45,96 +45,66 @@ func connectAndSend(addr string) *websocket.Conn {
     u := url.URL{Scheme: "ws", Host: addr, Path: "/ws"}
     log.Printf("Connecting to %s", u.String())
 
-    c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-    if err != nil {
-        log.Println("Dial failed:", err)
-        return nil
+    for {
+        c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+        if err != nil {
+            log.Printf("Dial failed: %v, retrying in 5 seconds...", err)
+            time.Sleep(5 * time.Second)
+            continue
+        }
+        log.Println("Connected successfully.")
+        return c
     }
+}
 
-    sendCameraInfo(c, "123456789", "00:1A:2B:3C:4D:5E")
-    return c
+func setupCloseHandler(c *websocket.Conn) {
+    ch := make(chan os.Signal, 1)
+    signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+    go func() {
+        <-ch
+        log.Println("Interrupt received, closing websocket connection")
+        c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+        os.Exit(0)
+    }()
 }
 
 func main() {
     flag.Parse()
-    log.SetFlags(0)
-
     log.Println("Starting Version:", version)
 
-    interrupt := make(chan os.Signal, 1)
-    signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
-
-    var c *websocket.Conn
-    for c == nil {
-        c = connectAndSend(*addr)
-        if c == nil {
-            log.Println("Trying to reconnect...")
-            time.Sleep(5 * time.Second)
-        }
-    }
+    c := connectAndSend(*addr)
     defer c.Close()
 
-    done := make(chan struct{})
+    sendCameraInfo(c, "123456789", "00:1A:2B:3C:4D:5E")
+
+    setupCloseHandler(c)
 
     ticker := time.NewTicker(5 * time.Second)
     defer ticker.Stop()
-    go func() {
-        for {
-            select {
-            case <-ticker.C:
-                log.Println("Sending heartbeat message")
-                heartbeatMsg := SignalMessage{Type: "heartbeat", Data: "ping"}
-                msg, err := json.Marshal(heartbeatMsg)
-                if err != nil {
-                    log.Println("Failed to marshal heartbeat message:", err)
-                    return
-                }
-                if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
-                    log.Println("Failed to send heartbeat message:", err)
-                    return
-                }
-            case <-interrupt:
-                log.Println("Interrupted, stopping heartbeat")
-                ticker.Stop()
-                return
-            }
-        }
-    }()
 
     go func() {
-        defer close(done)
-        for {
-            _, message, err := c.ReadMessage()
+        for range ticker.C {
+            log.Println("Sending heartbeat message")
+            heartbeatMsg := SignalMessage{Type: "heartbeat", Data: "ping"}
+            msg, err := json.Marshal(heartbeatMsg)
             if err != nil {
-                log.Println("Read error:", err)
-                return
+                log.Printf("Failed to marshal heartbeat message: %v", err)
+                continue
             }
-            log.Printf("Received: %s", message)
-
-            var msg SignalMessage
-            if err := json.Unmarshal(message, &msg); err != nil {
-                log.Println("Error parsing JSON message:", err)
+            if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
+                log.Printf("Failed to send heartbeat message: %v", err)
                 continue
             }
         }
     }()
 
+    // Reading messages
     for {
-        select {
-        case <-done:
-            return
-        case <-interrupt:
-            log.Println("Interrupted")
-            if err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
-                log.Println("Write close error:", err)
-                return
-            }
-            select {
-            case <-done:
-            case <-time.After(time.Second):
-            }
-            c.Close()
-            return
+        _, message, err := c.ReadMessage()
+        if err != nil {
+            log.Printf("Read error: %v", err)
+            break
         }
+        log.Printf("Received: %s", message)
     }
 }
