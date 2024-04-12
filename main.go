@@ -16,7 +16,7 @@ import (
 )
 
 var addr = flag.String("addr", "ncus.signal.kinnode.io:8080", "WebSocket service address for signaling")
-var version = "0.0.003"
+var version = "0.0.004"
 
 type SignalMessage struct {
 	Type string `json:"type"`
