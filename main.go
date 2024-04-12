@@ -15,6 +15,8 @@ import (
 
 // Address of the signaling server as a command-line flag
 var addr = flag.String("addr", "ncus.signal.kinnode.io:8080", "WebSocket service address for signaling")
+// Current Version
+var version = "0.0.001"
 
 // SignalMessage represents the JSON structure for signaling messages
 type SignalMessage struct {
@@ -62,7 +64,9 @@ func connectAndSend(addr string) *websocket.Conn {
 func main() {
     flag.Parse()
     log.SetFlags(0)
+    
 
+    log.Println("Starting Version: ", version)
     // Setup interrupt handling to gracefully shutdown the application
     interrupt := make(chan os.Signal, 1)
     signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
