@@ -14,7 +14,7 @@ import (
 )
 
 var addr = flag.String("addr", "ncus.signal.kinnode.io:8080", "WebSocket service address for signaling")
-var version = "0.0.002"
+var version = "0.0.003"
 
 type SignalMessage struct {
     Type string `json:"type"`
@@ -76,20 +76,25 @@ func main() {
 
     done := make(chan struct{})
 
-    // Send pings periodically
     ticker := time.NewTicker(30 * time.Second)
     defer ticker.Stop()
     go func() {
         for {
             select {
             case <-ticker.C:
-                log.Println("Sending heartbeat ping")
-                if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
-                    log.Println("Failed to send ping:", err)
+                log.Println("Sending heartbeat message")
+                heartbeatMsg := SignalMessage{Type: "heartbeat", Data: "ping"}
+                msg, err := json.Marshal(heartbeatMsg)
+                if err != nil {
+                    log.Println("Failed to marshal heartbeat message:", err)
+                    return
+                }
+                if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
+                    log.Println("Failed to send heartbeat message:", err)
                     return
                 }
             case <-interrupt:
-                log.Println("Interrupted, stopping pings")
+                log.Println("Interrupted, stopping heartbeat")
                 ticker.Stop()
                 return
             }
