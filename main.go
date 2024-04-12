@@ -13,24 +13,19 @@ import (
     "github.com/gorilla/websocket"
 )
 
-// Address of the signaling server as a command-line flag
 var addr = flag.String("addr", "ncus.signal.kinnode.io:8080", "WebSocket service address for signaling")
-// Current Version
-var version = "0.0.001"
+var version = "0.0.002"
 
-// SignalMessage represents the JSON structure for signaling messages
 type SignalMessage struct {
     Type string `json:"type"`
     Data string `json:"data"`
 }
 
-// CameraInfo represents the JSON structure for camera identification
 type CameraInfo struct {
     Serial string `json:"serial"`
     MAC    string `json:"mac"`
 }
 
-// sendCameraInfo sends the camera's serial number and MAC address to the server
 func sendCameraInfo(c *websocket.Conn, serial, mac string) {
     cameraInfo := CameraInfo{
         Serial: serial,
@@ -46,7 +41,6 @@ func sendCameraInfo(c *websocket.Conn, serial, mac string) {
     }
 }
 
-// connectAndSend initializes the WebSocket connection and sends the camera info
 func connectAndSend(addr string) *websocket.Conn {
     u := url.URL{Scheme: "ws", Host: addr, Path: "/ws"}
     log.Printf("Connecting to %s", u.String())
@@ -64,27 +58,44 @@ func connectAndSend(addr string) *websocket.Conn {
 func main() {
     flag.Parse()
     log.SetFlags(0)
-    
 
-    log.Println("Starting Version: ", version)
-    // Setup interrupt handling to gracefully shutdown the application
+    log.Println("Starting Version:", version)
+
     interrupt := make(chan os.Signal, 1)
     signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
 
-    // Establish WebSocket connection and handle reconnection if necessary
     var c *websocket.Conn
     for c == nil {
         c = connectAndSend(*addr)
         if c == nil {
             log.Println("Trying to reconnect...")
-            time.Sleep(5 * time.Second) // wait before retrying
+            time.Sleep(5 * time.Second)
         }
     }
     defer c.Close()
 
     done := make(chan struct{})
 
-    // Goroutine to handle incoming WebSocket messages
+    // Send pings periodically
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    go func() {
+        for {
+            select {
+            case <-ticker.C:
+                log.Println("Sending heartbeat ping")
+                if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
+                    log.Println("Failed to send ping:", err)
+                    return
+                }
+            case <-interrupt:
+                log.Println("Interrupted, stopping pings")
+                ticker.Stop()
+                return
+            }
+        }
+    }()
+
     go func() {
         defer close(done)
         for {
@@ -93,7 +104,6 @@ func main() {
                 log.Println("Read error:", err)
                 return
             }
-
             log.Printf("Received: %s", message)
 
             var msg SignalMessage
@@ -101,19 +111,15 @@ func main() {
                 log.Println("Error parsing JSON message:", err)
                 continue
             }
-            // Add handling for different types of messages here
-            // Example: if msg.Type == "offer" { ... }
         }
     }()
 
-    // Main loop to handle interrupts and shutdown gracefully
     for {
         select {
         case <-done:
             return
         case <-interrupt:
             log.Println("Interrupted")
-            // Cleanly close the connection by sending a close message
             if err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
                 log.Println("Write close error:", err)
                 return
