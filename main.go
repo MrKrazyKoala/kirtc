@@ -16,7 +16,7 @@ import (
 )
 
 var addr = flag.String("addr", "ncus.signal.kinnode.io:8080", "WebSocket service address for signaling")
-var version = "0.0.004"
+var version = "0.0.003"
 
 type SignalMessage struct {
 	Type string `json:"type"`
@@ -44,7 +44,7 @@ func sendCameraInfo(c *websocket.Conn, serial, mac string) {
 }
 
 func connectAndSend(addr string) *websocket.Conn {
-	u := url.URL{Scheme: "ws", Host: addr, Path: "/"}
+	u := url.URL{Scheme: "ws", Host: addr, Path: "/ws"}
 	log.Printf("Connecting to %s", u.String())
 
 	dialer := websocket.Dialer{
@@ -57,12 +57,13 @@ func connectAndSend(addr string) *websocket.Conn {
 				return nil, err
 			}
 			if tcpConn, ok := conn.(*net.TCPConn); ok {
-				tcpConn.SetNoDelay(true)
+				tcpConn.SetNoDelay(true) // Disable Nagle's algorithm for real-time communication.
 			}
 			return conn, nil
 		},
 	}
 
+	// Attempt to connect with retry on failure.
 	for {
 		c, _, err := dialer.Dial(u.String(), nil)
 		if err != nil {
@@ -116,7 +117,7 @@ func main() {
 		}
 	}()
 
-	// Reading messages
+	// Handle incoming messages
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
